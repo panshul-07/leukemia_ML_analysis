@@ -5,7 +5,7 @@ PyTorch/Jupyter experiments for leukemia image classification on two datasets:
 - **ALL-IDB1**: 108 labeled microscope images prepared from the local `ALL_IDB1` folder.
 - **Kaggle C-NMC leukemia dataset**: the dataset from [andrewmvd/leukemia-classification](https://www.kaggle.com/datasets/andrewmvd/leukemia-classification), with 10,661 labeled training images and 1,867 labeled preliminary test images.
 
-The notebooks are written to avoid unsupported claims. Metrics in this README come from saved local result files, and the dataset/results/checkpoint folders are ignored by git because they are large generated artifacts.
+The repository is organized around five experiment notebooks. The notebooks are written to avoid unsupported claims: metrics in this README come from saved local result files, and the dataset/results/checkpoint folders are ignored by git because they are large generated artifacts.
 
 ## Repository Layout
 
@@ -31,6 +31,37 @@ The notebooks are written to avoid unsupported claims. Metrics in this README co
 ```
 
 `data/`, `results/`, `.venv/`, checkpoints, and raw model weights are intentionally not committed.
+
+## Notebook Index
+
+| # | Notebook | Dataset | Main architecture | Evaluation path | Main local output |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | `01_resnet18_osl_paper.ipynb` | ALL-IDB1 | ResNet18 + Orthogonal Softmax Layer | Duplicate/content-grouped 10-fold CV | `results/resnet18_osl_paper/` |
+| 2 | `02_hybrid_cnn_transformer.ipynb` | ALL-IDB1 | VGG11-BN CNN + Transformer encoder | 5 acquisition-grouped folds, plus paper-protocol comparison | `results/hybrid_cnn_transformer_vgg_grouped/` |
+| 3 | `03_hybrid_cnn_gnn.ipynb` | ALL-IDB1 | VGG CNN + spatial GNN | 100-epoch grouped experiment record | `results/hybrid_cnn_gnn_vgg_enhanced_content_100ep/` |
+| 4 | `04_kaggle_cnn_transformer.ipynb` | Kaggle C-NMC | Compact residual CNN + Transformer encoder | Patient-wise train/validation split and labeled preliminary-test evaluation | `results/kaggle_compact_resnet_cnn_transformer_100ep/` |
+| 5 | `05_kaggle_cnn_gnn.ipynb` | Kaggle C-NMC | Compact residual CNN + spatial GNN | Patient-wise train/validation split and labeled preliminary-test evaluation | `results/kaggle_compact_resnet_cnn_gnn_100ep/` |
+
+## Project Flow
+
+```mermaid
+flowchart TB
+    A["Raw ALL-IDB1 folder"] --> B["scripts/prepare_all_idb1.py"]
+    B --> C["data/processed/all_idb1<br/>manifest + train/val/test folders"]
+    C --> N1["01 ResNet18 + OSL"]
+    C --> N2["02 VGG CNN + Transformer"]
+    C --> N3["03 VGG CNN + GNN"]
+
+    K["Raw Kaggle C-NMC folder"] --> N4["04 Compact CNN + Transformer<br/>self-contained notebook"]
+    K --> N5["05 Compact CNN + GNN<br/>self-contained notebook"]
+
+    N1 --> R["ignored results/ artifacts<br/>metrics, predictions, plots, checkpoints"]
+    N2 --> R
+    N3 --> R
+    N4 --> R
+    N5 --> R
+    R --> M["README summary tables<br/>and optional Gradio inspection app"]
+```
 
 ## Setup
 
@@ -64,7 +95,18 @@ Prepare and validate it with:
   --overwrite
 ```
 
-Validation checks the official 59 healthy / 49 leukemia class count, label suffixes, duplicate content groups, and split leakage.
+Validation checks the official 59 healthy / 49 leukemia class count, label suffixes, duplicate content groups, and split leakage. Official ALL-IDB1 filename suffixes are interpreted as `_0` for healthy and `_1` for leukemia.
+
+The current local prepared ImageFolder split is:
+
+| Split | Healthy | Leukemia | Total |
+| --- | ---: | ---: | ---: |
+| Train | 41 | 34 | 75 |
+| Validation | 8 | 7 | 15 |
+| Test | 10 | 8 | 18 |
+| Total | 59 | 49 | 108 |
+
+The cross-validation notebooks do not depend only on this fixed 70/15/15 split. They also use `manifest.json` and grouped fold IDs so duplicate content or nearby acquisition bursts are kept in the same evaluation fold.
 
 ### Kaggle C-NMC leukemia dataset
 
@@ -76,16 +118,18 @@ data/raw/kaggle_leukemia_classification/kagglehub_cache/datasets/andrewmvd/leuke
 
 The self-contained Kaggle notebooks verify these counts before training:
 
-| Split | Images |
-| --- | ---: |
-| Training, `all` leukemia | 7,272 |
-| Training, `hem` healthy | 3,389 |
-| Labeled preliminary test | 1,867 |
-| Unlabeled final test folder | 2,586 |
+| Dataset area | `all` leukemia | `hem` healthy | Total |
+| --- | ---: | ---: | ---: |
+| Training fold 0 | 2,397 | 1,130 | 3,527 |
+| Training fold 1 | 2,418 | 1,163 | 3,581 |
+| Training fold 2 | 2,457 | 1,096 | 3,553 |
+| Training total | 7,272 | 3,389 | 10,661 |
+| Labeled preliminary test | 1,219 | 648 | 1,867 |
+| Unlabeled final test folder | n/a | n/a | 2,586 |
 
-The unlabeled final test folder is not scored.
+Preliminary-test labels come from `validation_data/C-NMC_test_prelim_phase_data_labels.csv`, where label `1` maps to ALL/leukemia and label `0` maps to HEM/healthy. The unlabeled final test folder is not scored.
 
-## Notebook Architecture Blocks
+## Five Notebook Architecture Block Diagrams
 
 ### 01. ResNet18 + Orthogonal Softmax Layer
 
@@ -106,6 +150,7 @@ flowchart LR
 Key details:
 
 - Uses the literal diagonal OSL mask.
+- Uses 224 x 224 RGB inputs and the `paper` preprocessing profile.
 - Uses content-grouped 10-fold evaluation.
 - No pretrained weights are loaded.
 
@@ -129,6 +174,7 @@ flowchart LR
 Key details:
 
 - Uses acquisition-grouped folds to reduce camera/session leakage.
+- Uses 224 x 224 RGB inputs, a VGG11-BN backbone, 256-dim tokens, 8 attention heads, and 4 Transformer layers.
 - Uses label smoothing, weight decay, gradient clipping, LR scheduling, and early stopping.
 - Grad-CAM is computed on the final CNN feature map feeding the Transformer.
 
@@ -138,11 +184,11 @@ Key details:
 
 ```mermaid
 flowchart LR
-    A["ALL-IDB1 image"] --> B["Microscopy preprocessing"]
-    B --> C["CNN feature map"]
+    A["ALL-IDB1 image"] --> B["Enhanced microscopy preprocessing<br/>white balance + segmentation mosaic"]
+    B --> C["VGG11-BN CNN backbone<br/>weights=None"]
     C --> D["Spatial grid tokens"]
     D --> E["Graph edges over neighboring grid cells"]
-    E --> F["Graph convolution/message passing blocks"]
+    E --> F["SpatialGraphConvolution blocks"]
     F --> G["Mean + max graph readout"]
     G --> H["MLP classifier"]
     H --> I["Healthy vs leukemia logits"]
@@ -151,6 +197,7 @@ flowchart LR
 Key details:
 
 - Uses only local ALL-IDB1 images.
+- Uses 224 x 224 RGB inputs, 256-dim graph tokens, 3 graph layers, and 8-neighbor grid connectivity in the saved configuration.
 - Kept as a measured experiment record instead of a claimed 98% result.
 
 ### 04. Kaggle Compact ResNet CNN + Transformer
@@ -174,6 +221,7 @@ flowchart LR
 Key details:
 
 - Runs for 100 epochs by default.
+- Uses 96 x 96 RGB inputs, 96-dim tokens, 2 Transformer layers, and 4 attention heads.
 - Uses patient-wise train/validation split from the Kaggle training folders.
 - Evaluates on the labeled preliminary test split with 4-flip TTA.
 - Grad-CAM overlays are generated from the final residual CNN stage.
@@ -199,6 +247,7 @@ Key details:
 
 - Runs for 100 epochs by default.
 - Uses the same Kaggle DB only.
+- Uses 96 x 96 RGB inputs, 96-dim graph tokens, 3 graph layers, and an 8-neighbor 12 x 12 spatial graph.
 - Uses 4-flip TTA and validation-tuned thresholding for final labeled preliminary-test evaluation.
 - Grad-CAM overlays are generated from the final residual CNN feature stage before graph construction.
 
