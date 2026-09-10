@@ -1,0 +1,58 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Create virtual environment",
+      "type": "shell",
+      "command": "python3 -m venv .venv",
+      "problemMatcher": []
+    },
+    {
+      "label": "Install dependencies",
+      "type": "shell",
+      "command": ".venv/bin/python -m pip install -r requirements.txt",
+      "dependsOn": "Create virtual environment",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Prepare ALL-IDB1",
+      "type": "shell",
+      "command": ".venv/bin/python scripts/prepare_all_idb1.py --source /Users/panshulaj/Downloads/ALL_IDB1 --processed-output data/processed/all_idb1 --overwrite",
+      "problemMatcher": []
+    },
+    {
+      "label": "Train Both Models",
+      "type": "shell",
+      "command": ".venv/bin/python scripts/train_both_models.py",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Train ResNet18 OSL",
+      "type": "shell",
+      "command": ".venv/bin/python train.py --model resnet18_osl",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Train Hybrid CNN Transformer",
+      "type": "shell",
+      "command": ".venv/bin/python train.py --model hybrid_cnn_transformer --cnn-backbone-name vgg11_bn --preprocessing-profile hybrid --report-dir results/reports/hybrid_cnn_transformer --checkpoint-dir results/checkpoints/hybrid_cnn_transformer",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Open Paper Model Notebook",
+      "type": "shell",
+      "command": "code notebooks/01_resnet18_osl_paper.ipynb",
+      "problemMatcher": []
+    },
+    {
+      "label": "Open Hybrid Model Notebook",
+      "type": "shell",
+      "command": "code notebooks/02_hybrid_cnn_transformer.ipynb",
+      "problemMatcher": []
+    }
+  ]
+}

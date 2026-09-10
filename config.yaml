@@ -1,0 +1,37 @@
+data:
+  processed_dir: data/processed/all_idb1
+  image_size: 224
+  num_workers: 0
+
+model:
+  name: resnet18_osl
+  pretrained_backbone: false
+  freeze_backbone: false
+  hidden_dim: 2
+  dropout: 0.6
+  mask_mode: diagonal
+  embed_dim: 256
+  transformer_heads: 8
+  transformer_layers: 4
+  transformer_dropout: 0.35
+  attention_dropout: 0.0
+  cnn_backbone_name: vgg11_bn
+  gnn_layers: 3
+  gnn_dropout: 0.2
+  graph_neighbors: 8
+
+training:
+  batch_size: 16
+  epochs: 160
+  learning_rate: 0.0001
+  weight_decay: 0.0005
+  label_smoothing: 0.05
+  max_grad_norm: 1.0
+  lr_reduce_factor: 0.5
+  lr_reduce_patience: 6
+  min_learning_rate: 0.000001
+  min_delta: 0.0001
+  patience: 25
+  seed: 42
+  checkpoint_dir: results/checkpoints
+  report_dir: results/reports
