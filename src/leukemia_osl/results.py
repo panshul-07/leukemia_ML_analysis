@@ -306,15 +306,59 @@ def _save_predictions(
 
 def _plot_training_curves(history: pd.DataFrame, path: Path) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-    axes[0].plot(history["epoch"], history["train_loss"], label="Train")
-    axes[0].plot(history["epoch"], history["val_loss"], label="Validation")
+
+    # Cross-validation histories restart at epoch 1 for every fold. Plotting the
+    # concatenated table would connect the end of one fold to the beginning of
+    # the next and create misleading diagonal lines.
+    if "fold" in history.columns and history["fold"].nunique() > 1:
+        for _, fold_history in history.groupby("fold", sort=True):
+            axes[0].plot(
+                fold_history["epoch"], fold_history["train_loss"],
+                color="tab:blue", alpha=0.18, linewidth=1,
+            )
+            axes[0].plot(
+                fold_history["epoch"], fold_history["val_loss"],
+                color="tab:orange", alpha=0.18, linewidth=1,
+            )
+            axes[1].plot(
+                fold_history["epoch"], fold_history["train_accuracy"],
+                color="tab:blue", alpha=0.18, linewidth=1,
+            )
+            axes[1].plot(
+                fold_history["epoch"], fold_history["val_accuracy"],
+                color="tab:orange", alpha=0.18, linewidth=1,
+            )
+
+        mean_history = history.groupby("epoch", as_index=False).mean(numeric_only=True)
+        plot_history = mean_history
+        train_label = "Train mean"
+        validation_label = "Validation mean"
+    else:
+        plot_history = history
+        train_label = "Train"
+        validation_label = "Validation"
+
+    axes[0].plot(
+        plot_history["epoch"], plot_history["train_loss"],
+        color="tab:blue", linewidth=2, label=train_label,
+    )
+    axes[0].plot(
+        plot_history["epoch"], plot_history["val_loss"],
+        color="tab:orange", linewidth=2, label=validation_label,
+    )
     axes[0].set_title("Loss")
     axes[0].set_xlabel("Epoch")
     axes[0].set_ylabel("Cross-entropy")
     axes[0].legend()
 
-    axes[1].plot(history["epoch"], history["train_accuracy"], label="Train")
-    axes[1].plot(history["epoch"], history["val_accuracy"], label="Validation")
+    axes[1].plot(
+        plot_history["epoch"], plot_history["train_accuracy"],
+        color="tab:blue", linewidth=2, label=train_label,
+    )
+    axes[1].plot(
+        plot_history["epoch"], plot_history["val_accuracy"],
+        color="tab:orange", linewidth=2, label=validation_label,
+    )
     axes[1].set_title("Accuracy")
     axes[1].set_xlabel("Epoch")
     axes[1].set_ylabel("Accuracy")
