@@ -1,0 +1,27 @@
+{
+  "model": {
+    "name": "hybrid_cnn_gnn",
+    "pretrained_backbone": true,
+    "freeze_backbone": false,
+    "cnn_backbone_name": "inception_v3",
+    "embed_dim": 128,
+    "gnn_layers": 2,
+    "gnn_dropout": 0.2,
+    "graph_neighbors": 8,
+    "dropout": 0.3
+  },
+  "profile": "hybrid_microscopy",
+  "grouping": "content",
+  "image_size": 299,
+  "batch_size": 4,
+  "epochs": 10,
+  "patience": 10,
+  "learning_rate": 0.0003,
+  "backbone_lr_scale": 0.1,
+  "weight_decay": 0.0005,
+  "label_smoothing": 0.02,
+  "threshold_policy": "argmax",
+  "test_time_augmentation": true,
+  "seed": 42,
+  "source": "prepared real ALL-IDB1 files copied from manifest paths"
+}

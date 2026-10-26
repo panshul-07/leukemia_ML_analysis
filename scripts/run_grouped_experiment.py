@@ -27,7 +27,7 @@ from leukemia_osl.preprocess import (
     validate_prepared_all_idb1,
 )
 from leukemia_osl.results import compute_result_metrics, save_result_bundle
-from train import evaluate, set_seed, train_one_epoch
+from leukemia_osl.training import evaluate, set_seed, train_one_epoch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -38,11 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, default=PROJECT_ROOT / "data/processed/all_idb1")
     parser.add_argument("--result-name", type=str, required=True)
     parser.add_argument("--checkpoint-name", type=str, required=True)
-    parser.add_argument(
-        "--model-name",
-        choices=["hybrid_cnn_transformer", "hybrid_cnn_gnn"],
-        default="hybrid_cnn_transformer",
-    )
+    parser.add_argument("--model-name", choices=["hybrid_cnn_gnn"], default="hybrid_cnn_gnn")
     parser.add_argument("--grouping", choices=["acquisition", "content"], default="acquisition")
     parser.add_argument(
         "--profile",
@@ -55,17 +51,18 @@ def parse_args() -> argparse.Namespace:
         ],
         default="hybrid",
     )
-    parser.add_argument("--backbone", type=str, default="vgg11_bn")
+    parser.add_argument(
+        "--backbone", choices=["efficientnet_b3", "inception_v3"], default="inception_v3"
+    )
+    parser.add_argument("--pretrained", action="store_true")
+    parser.add_argument("--backbone-lr-scale", type=float, default=0.1)
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--epochs", type=int, default=160)
+    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--patience", type=int, default=25)
     parser.add_argument("--inner-splits", type=int, default=4)
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--embed-dim", type=int, default=256)
-    parser.add_argument("--heads", type=int, default=8)
-    parser.add_argument("--layers", type=int, default=4)
-    parser.add_argument("--transformer-dropout", type=float, default=0.35)
     parser.add_argument("--gnn-layers", type=int, default=3)
     parser.add_argument("--gnn-dropout", type=float, default=0.20)
     parser.add_argument("--graph-neighbors", type=int, choices=[4, 8], default=8)
@@ -78,8 +75,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-delta", type=float, default=1e-4)
     parser.add_argument("--threshold-policy", choices=["argmax", "val_balanced"], default="argmax")
     parser.add_argument("--test-time-augmentation", action="store_true")
+    parser.add_argument("--target-accuracy", type=float, default=0.95)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
 
@@ -141,14 +140,10 @@ def main() -> None:
 
     model_config = {
         "name": args.model_name,
-        "pretrained_backbone": False,
+        "pretrained_backbone": args.pretrained,
         "freeze_backbone": False,
         "cnn_backbone_name": args.backbone,
         "embed_dim": args.embed_dim,
-        "transformer_heads": args.heads,
-        "transformer_layers": args.layers,
-        "transformer_dropout": args.transformer_dropout,
-        "attention_dropout": 0.0,
         "gnn_layers": args.gnn_layers,
         "gnn_dropout": args.gnn_dropout,
         "graph_neighbors": args.graph_neighbors,
@@ -197,14 +192,23 @@ def main() -> None:
         train_records = [records[index] for index in train_indices]
         val_records = [records[index] for index in val_indices]
         test_records = [records[index] for index in test_indices]
+        for left, right in [(train_indices, val_indices), (train_indices, test_indices), (val_indices, test_indices)]:
+            assert set(groups[left]).isdisjoint(groups[right]), "Group leakage"
+        if any(len({r.label for r in split}) != 2 for split in (train_records, val_records, test_records)):
+            raise ValueError("Each grouped split must contain both classes; revise the fold count.")
 
-        mean, std = estimate_record_channel_stats(
-            train_records,
-            image_size=args.image_size,
-            batch_size=max(1, min(args.batch_size, 8)),
-            num_workers=0,
-            profile=args.profile,
-        )
+        # No held-out statistics: fixed ImageNet normalization for transfer learning.
+        if args.pretrained:
+            mean, std = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+        else:
+            mean, std = estimate_record_channel_stats(
+                train_records,
+                image_size=args.image_size,
+                batch_size=max(1, min(args.batch_size, 8)),
+                num_workers=0,
+                profile=args.profile,
+            )
+
         loaders, class_names = make_record_loaders(
             train_records,
             val_records,
@@ -218,7 +222,7 @@ def main() -> None:
         )
 
         model = create_model(num_classes=len(class_names), **model_config).to(device)
-        assert model.uses_pretrained_weights is False
+        assert model.uses_pretrained_weights == args.pretrained
         class_to_idx = {name: index for index, name in enumerate(class_names)}
         train_targets = np.array([class_to_idx[record.label] for record in train_records])
         class_counts = np.bincount(train_targets, minlength=len(class_names))
@@ -227,8 +231,24 @@ def main() -> None:
             weight=torch.tensor(class_weights, dtype=torch.float32, device=device),
             label_smoothing=args.label_smoothing,
         )
+        if args.dry_run:
+            images, targets = next(iter(loaders["train"]))
+            images, targets = images[:2].to(device), targets[:2].to(device)
+            logits = model(images)
+            criterion(logits, targets).backward()
+            print(
+                f"Dry run passed: fold={fold}, input={tuple(images.shape)}, "
+                f"logits={tuple(logits.shape)}",
+                flush=True,
+            )
+            return
         optimizer = optim.AdamW(
-            model.parameters(),
+            [
+                {"params": model.cnn_backbone.parameters(),
+                 "lr": args.lr * (args.backbone_lr_scale if args.pretrained else 1.0)},
+                {"params": [p for name, p in model.named_parameters()
+                            if not name.startswith("cnn_backbone.")], "lr": args.lr},
+            ],
             lr=args.lr,
             weight_decay=args.weight_decay,
         )
@@ -241,6 +261,7 @@ def main() -> None:
         )
 
         best_val_loss = float("inf")
+        best_selection_score = (-1.0, float("-inf"))
         best_epoch = 0
         best_train_accuracy = 0.0
         best_val_accuracy = 0.0
@@ -274,8 +295,16 @@ def main() -> None:
                     "learning_rate": optimizer.param_groups[0]["lr"],
                 }
             )
-            if val_loss < best_val_loss - args.min_delta:
+            pd.DataFrame(all_history).to_csv(result_dir / "training_history_live.csv", index=False)
+            print(
+                f"Fold {fold:02d}/{args.folds} epoch {epoch:02d}/{args.epochs}: "
+                f"train_accuracy={train_accuracy:.4f} val_accuracy={val_accuracy:.4f} "
+                f"val_loss={val_loss:.4f}", flush=True,
+            )
+            selection_score = (val_accuracy, -val_loss)
+            if selection_score > best_selection_score:
                 best_val_loss = val_loss
+                best_selection_score = selection_score
                 best_epoch = epoch
                 best_train_accuracy = train_accuracy
                 best_val_accuracy = val_accuracy
@@ -291,7 +320,7 @@ def main() -> None:
                         "train_groups": sorted(set(groups[train_indices].tolist())),
                         "val_groups": sorted(set(groups[val_indices].tolist())),
                         "test_groups": sorted(set(groups[test_indices].tolist())),
-                        "pretrained_weights": False,
+                        "pretrained_weights": args.pretrained,
                         "initialization_source": model.initialization_source,
                     },
                     best_path,
@@ -371,6 +400,7 @@ def main() -> None:
             }
         )
         fold_metric_rows.append(fold_metrics)
+        pd.DataFrame(fold_metric_rows).to_csv(result_dir / "fold_metrics_live.csv", index=False)
         print(
             f"Fold {fold:02d}/{args.folds}: test_accuracy={fold_accuracy:.4f}, "
             f"best_epoch={best_epoch}, threshold={threshold:.4f}, "
@@ -402,7 +432,9 @@ def main() -> None:
         bootstrap_groups=all_test_groups,
     )
     final_metrics["Evaluation/Folds"] = args.folds
-    final_metrics["Training/Pretrained_Weights"] = 0
+    final_metrics["Training/Pretrained_Weights"] = int(args.pretrained)
+    final_metrics["Target/Accuracy"] = args.target_accuracy
+    final_metrics["Target/Reached"] = bool(final_metrics["Final/Accuracy"] >= args.target_accuracy)
     final_metrics["Training/Mean_Generalization_Gap"] = float(
         np.mean([row["Training/Generalization_Gap"] for row in fold_metric_rows])
     )
@@ -439,6 +471,7 @@ def main() -> None:
                 "epochs": args.epochs,
                 "patience": args.patience,
                 "learning_rate": args.lr,
+                "backbone_lr_scale": args.backbone_lr_scale,
                 "weight_decay": args.weight_decay,
                 "label_smoothing": args.label_smoothing,
                 "threshold_policy": args.threshold_policy,

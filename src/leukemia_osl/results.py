@@ -151,6 +151,18 @@ def compute_result_metrics(
     positives = labels_array == positive_index
     true_positives = ((predictions_array == positive_index) & positives).sum()
     sensitivity = float(true_positives / positives.sum()) if positives.any() else float("nan")
+    false_negatives = int(positives.sum() - true_positives)
+    false_positives = int(negatives.sum() - true_negatives)
+    true_positives = int(true_positives)
+    true_negatives = int(true_negatives)
+
+    def safe_ratio(numerator: float, denominator: float) -> float:
+        return float(numerator / denominator) if denominator else float("nan")
+
+    ppv = safe_ratio(true_positives, true_positives + false_positives)
+    npv = safe_ratio(true_negatives, true_negatives + false_negatives)
+    false_positive_rate = safe_ratio(false_positives, false_positives + true_negatives)
+    false_negative_rate = safe_ratio(false_negatives, false_negatives + true_positives)
 
     metrics: dict[str, float | int] = {
         "Final/Accuracy": float(accuracy),
@@ -195,6 +207,22 @@ def compute_result_metrics(
         "Final/Cohen_Kappa": float(cohen_kappa_score(labels_array, predictions_array)),
         "Final/Sensitivity": sensitivity,
         "Final/Specificity": specificity,
+        "Final/Precision_PPV": ppv,
+        "Final/Negative_Predictive_Value": npv,
+        "Final/False_Positive_Rate": false_positive_rate,
+        "Final/False_Negative_Rate": false_negative_rate,
+        "Final/False_Discovery_Rate": 1.0 - ppv,
+        "Final/False_Omission_Rate": 1.0 - npv,
+        "Final/Jaccard_Index": safe_ratio(
+            true_positives, true_positives + false_positives + false_negatives
+        ),
+        "Final/G_Mean": float(np.sqrt(sensitivity * specificity)),
+        "Final/Youden_J": sensitivity + specificity - 1.0,
+        "Final/Prevalence": safe_ratio(int(positives.sum()), len(labels_array)),
+        "Final/True_Positives": true_positives,
+        "Final/True_Negatives": true_negatives,
+        "Final/False_Positives": false_positives,
+        "Final/False_Negatives": false_negatives,
         "Final/Test_Loss": float(test_loss),
         "Final/Test_Samples": int(len(labels_array)),
         "Final/Bootstrap_Groups": int(len(np.unique(groups_array)))

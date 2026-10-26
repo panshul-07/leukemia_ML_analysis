@@ -1,11 +1,7 @@
-"""From-scratch ResNet18-OSL, CNN-Transformer, and CNN-GNN classifiers for ALL-IDB1."""
+"""Dataset-specific pretrained CNN + dynamic GNN classifiers for leukemia microscopy."""
 
 __all__ = [
     "HybridCNNGNN",
-    "HybridCNNTransformer",
-    "OrthogonalSoftmaxLayer",
-    "ResNet18OSL",
-    "SpatialGraphConvolution",
     "create_model",
 ]
 
